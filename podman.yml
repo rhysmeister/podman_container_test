@@ -1,25 +1,257 @@
 ---
-- name: Setup Podman and Nginx container using podman_container with systemd
+- name: Setup Podman and container using podman_container with systemd
   hosts: all
   become: yes
 
   tasks:
     - name: Install Podman
-      dnf:
+      ansible.builtin.dnf:
         name: podman
         state: present
 
-    - name: Create and run Nginx container with systemd service
-      podman_container:
+    - name: Create and run container with systemd service
+      containers.podman.podman_container:
         name: nginx-container
-        image: nginx:latest
+        image: docker.io/library/nginx:perl
+        state: started
+        recreate: true
+        restart_policy: always
+        ports:
+          - "80:80"
+        generate_systemd:
+          path: /etc/systemd/system
+          restart_policy: always
+          stop_timeout: 120
+          names: true
+          container_prefix: podman
+        # systemd_restart_policy: always ChatGTP makes stuff up!
+      register: nginx_container
+
+    - name: Ensure container service is enabled and started
+      ansible.builtin.systemd:
+        name: "podman-nginx-container"
+        enabled: true
+        state: "started"
+      when: nginx_container.changed
+
+    - ansible.builtin.pause:
+        seconds: 30
+
+    - name: Has my service started?
+      ansible.builtin.shell: journalctl -u podman-nginx-container.service | grep "Starting Podman podman-nginx-container.service" | wc -l
+      register: service_start_count
+      changed_when: false
+
+    - ansible.builtin.assert:
+        that:
+          - service_start_count.stdout | trim | int == 1
+
+    - name: Check what container is running
+      ansible.builtin.shell: podman container ls | grep nginx
+      register: what_container
+      changed_when: false
+
+    - ansible.builtin.assert:
+        that:
+          - "'docker.io/library/nginx:perl' in what_container.stdout"
+          - "'0.0.0.0:80->80/tcp' in what_container.stdout"
+
+    - name: Scrape localhost URL and check for specific text
+      ansible.builtin.uri:
+        url: http://localhost
+        return_content: yes
+      register: webpage_content
+
+    - name: Verify the Nginx web server installation text is present
+      ansible.builtin.assert:
+        that:
+          - "'the nginx web server is successfully installed' in webpage_content.content"
+
+    - name: Prefetch container
+      containers.podman.podman_image:
+        name: docker.io/library/nginx:otel
+
+    - name: Change the container image
+      containers.podman.podman_container:
+        name: nginx-container
+        image: docker.io/library/nginx:otel
         state: started
         restart_policy: always
         ports:
           - "80:80"
-        generate_systemd: true
-        systemd_restart_policy: always
+        generate_systemd:
+          path: /etc/systemd/system
+          restart_policy: always
+          stop_timeout: 120
+          names: true
+          container_prefix: podman
+        # systemd_restart_policy: always ChatGTP makes stuff up!
       register: nginx_container
 
+    - ansible.builtin.assert:
+        that:
+          - nginx_container.changed
 
+    - pause:
+        seconds: 10
 
+    - name: Has my service restarted?
+      ansible.builtin.shell: journalctl -u podman-nginx-container.service | grep "Starting Podman podman-nginx-container.service" | wc -l
+      register: second_service_start_count
+      changed_when: false
+
+    - ansible.builtin.assert:
+        that:
+          - second_service_start_count.stdout | trim | int > 1
+
+    - name: Check what container is running
+      ansible.builtin.shell: podman container ls | grep nginx
+      register: what_container
+      changed_when: false
+
+    - ansible.builtin.assert:
+        that:
+          - "'docker.io/library/nginx:otel' in what_container.stdout"
+          - "'0.0.0.0:80->80/tcp' in what_container.stdout"
+
+    - name: Scrape localhost URL and check for specific text
+      ansible.builtin.uri:
+        url: http://localhost
+        return_content: yes
+      register: webpage_content
+
+    - name: Verify the Nginx web server installation text is present
+      ansible.builtin.assert:
+        that:
+          - "'the nginx web server is successfully installed' in webpage_content.content"
+
+    - name: Change the port
+      containers.podman.podman_container:
+        name: nginx-container
+        image: docker.io/library/nginx:otel
+        state: started
+        restart_policy: always
+        ports:
+          - "8080:80"
+        generate_systemd:
+          path: /etc/systemd/system
+          restart_policy: always
+          stop_timeout: 120
+          names: true
+          container_prefix: podman
+        # systemd_restart_policy: always ChatGTP makes stuff up!
+      register: nginx_container
+
+    - name: On this occassion we need to issue a daemon-reload
+      ansible.builtin.systemd:
+        daemon_reload: true
+      when: nginx_container.changed
+
+    - ansible.builtin.assert:
+        that:
+          - nginx_container.changed
+
+    - ansible.builtin.pause:
+        seconds: 10
+
+    # Service is not restarted for the port change!
+    #- name: Has my service restarted?
+    #  ansible.builtin.shell: journalctl -u podman-nginx-container.service | grep "Starting Podman podman-nginx-container.service" | wc -l
+    #  register: third_service_start_count
+    #  changed_when: false
+
+    #- ansible.builtin.assert:
+    #    that:
+    #      - third_service_start_count.stdout | trim | int > second_service_start_count.stdout | trim | int
+
+    - name: Check what container is running
+      ansible.builtin.shell: podman container ls | grep nginx
+      register: what_container
+      changed_when: false
+
+    - ansible.builtin.assert:
+        that:
+          - "'docker.io/library/nginx:otel' in what_container.stdout"
+          - "'0.0.0.0:8080->80/tcp' in what_container.stdout"
+
+    - name: Scrape localhost URL and check for specific text
+      ansible.builtin.uri:
+        url: http://localhost:8080
+        return_content: yes
+      register: webpage_content
+
+    - name: Verify the Nginx web server installation text is present
+      ansible.builtin.assert:
+        that:
+          - "'the nginx web server is successfully installed' in webpage_content.content"
+
+    - name: Change a systemd config option
+      containers.podman.podman_container:
+        name: nginx-container
+        image: docker.io/library/nginx:otel
+        state: started
+        restart_policy: always
+        ports:
+          - "8080:80"
+        generate_systemd:
+          path: /etc/systemd/system
+          restart_policy: always
+          stop_timeout: 121  # inc by 1 second
+          names: true
+          container_prefix: podman
+        # systemd_restart_policy: always ChatGTP makes stuff up!
+      register: nginx_container
+
+    - name: Check stop timeout is old value
+      ansible.builtin.shell: systemctl show podman-nginx-container.service -p TimeoutStopUSec
+      register: what_timeout
+      changed_when: false
+
+    - ansible.builtin.assert:
+        that:
+          - what_timeout.stdout | trim == "TimeoutStopUSec=3min" 
+
+    - name: On this occassion we need to issue a daemon-reload
+      ansible.builtin.systemd:
+        daemon_reload: true
+      when: nginx_container.changed
+
+    - name: Check stop timeout is new value
+      ansible.builtin.shell: systemctl show podman-nginx-container.service -p TimeoutStopUSec
+      register: what_timeout
+      changed_when: false
+
+    - ansible.builtin.assert:
+        that:
+          - what_timeout.stdout | trim == "TimeoutStopUSec=3min 1s"
+
+    # a setting change under the systemd key does not restart or do a daemon-reload
+    #- name: Has my service restarted?
+    #  ansible.builtin.shell: journalctl -u podman-nginx-container.service | grep "Starting Podman podman-nginx-container.service" | wc -l
+    #  register: fourth_service_start_count
+    #  changed_when: false
+
+    #- ansible.builtin.assert:
+    #    that:
+    #      - fourth_service_start_count.stdout | trim | int > second_service_start_count.stdout | trim | int
+
+    - name: Check what container is running
+      ansible.builtin.shell: podman container ls | grep nginx
+      register: what_container
+      changed_when: false
+
+    - ansible.builtin.assert:
+        that:
+          - "'docker.io/library/nginx:otel' in what_container.stdout"
+          - "'0.0.0.0:8080->80/tcp' in what_container.stdout"
+
+    - name: Scrape localhost URL and check for specific text
+      ansible.builtin.uri:
+        url: http://localhost:8080
+        return_content: yes
+      register: webpage_content
+
+    - name: Verify the Nginx web server installation text is present
+      ansible.builtin.assert:
+        that:
+          - "'the nginx web server is successfully installed' in webpage_content.content"
