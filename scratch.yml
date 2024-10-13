@@ -1,0 +1,25 @@
+    # Update the container to a different version of Nginx image
+    - name: Update Nginx container to an older version
+      podman_container:
+        name: nginx-container
+        image: nginx:1.19
+        state: started
+        restart_policy: always
+        ports:
+          - "80:80"
+        generate_systemd: true
+        systemd_restart_policy: always
+      register: updated_nginx_container
+
+    # Update container configuration (change port)
+    - name: Update Nginx container configuration (change port)
+      podman_container:
+        name: nginx-container
+        image: nginx:1.19
+        state: started
+        restart_policy: always
+        ports:
+          - "8080:80"
+        generate_systemd: true
+        systemd_restart_policy: always
+      register: config_nginx_container

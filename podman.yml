@@ -1,0 +1,25 @@
+---
+- name: Setup Podman and Nginx container using podman_container with systemd
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Install Podman
+      dnf:
+        name: podman
+        state: present
+
+    - name: Create and run Nginx container with systemd service
+      podman_container:
+        name: nginx-container
+        image: nginx:latest
+        state: started
+        restart_policy: always
+        ports:
+          - "80:80"
+        generate_systemd: true
+        systemd_restart_policy: always
+      register: nginx_container
+
+
+
